@@ -257,7 +257,127 @@ generate_branch_preview() {
 }
 
 #============================================================
-# ENTRY POINT (parcial - apenas para Story S1-S2)
+# UI UTILITY FUNCTIONS
+#============================================================
+
+# Exibir tela de ajuda
+show_help_screen() {
+  clear
+
+  if command -v gum &> /dev/null; then
+    gum style \
+      --border="rounded" \
+      --border-foreground="$COLOR_PRIMARY" \
+      --padding="1 2" \
+      --width=60 \
+      "$(cat <<EOF
+          AJUDA - Git Branch Delete
+
+$(gum style --bold --foreground="$COLOR_SUCCESS" "Navegação:")
+  ↑↓        Mover entre opções
+  SPACE     Selecionar/desselecionar
+  ENTER     Confirmar seleção
+  ESC       Voltar
+  CTRL+C    Sair do script
+
+$(gum style --bold --foreground="$COLOR_SUCCESS" "Branches Protegidas:")
+$(printf '  • %s\n' "${PROTECTED_BRANCHES[@]}")
+
+$(gum style --bold --foreground="$COLOR_SUCCESS" "Argumentos CLI:")
+  ./git-delete-branches.sh [padrão1] [padrão2]
+
+  Exemplo: ./git-delete-branches.sh 1234 hotfix
+  (exclui branches contendo "1234" ou "hotfix")
+
+$(gum style --bold --foreground="$COLOR_SUCCESS" "Instalação do gum:")
+  Ubuntu/Debian:
+    https://github.com/charmbracelet/gum#installation
+
+  macOS:
+    brew install gum
+
+$(gum style --bold --foreground="$COLOR_INFO" "Versão: $VERSION")
+EOF
+)"
+
+    echo ""
+    gum confirm "Voltar ao menu?" --default=yes --affirmative="Sim" --negative="Não" || return
+  else
+    # Fallback sem gum
+    cat <<EOF
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+          AJUDA - Git Branch Delete
+
+Navegação:
+  ↑↓        Mover entre opções
+  SPACE     Selecionar/desselecionar
+  ENTER     Confirmar seleção
+  ESC       Voltar
+  CTRL+C    Sair do script
+
+Branches Protegidas:
+$(printf '  • %s\n' "${PROTECTED_BRANCHES[@]}")
+
+Argumentos CLI:
+  ./git-delete-branches.sh [padrão1] [padrão2]
+
+  Exemplo: ./git-delete-branches.sh 1234 hotfix
+  (exclui branches contendo "1234" ou "hotfix")
+
+Instalação do gum:
+  Ubuntu/Debian:
+    https://github.com/charmbracelet/gum#installation
+
+  macOS:
+    brew install gum
+
+Versão: $VERSION
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF
+    echo ""
+    read -p "Pressione ENTER para voltar..."
+  fi
+}
+
+# Exibir banner inicial
+show_banner() {
+  if command -v gum &> /dev/null; then
+    gum style \
+      --foreground="$COLOR_PRIMARY" \
+      --border="rounded" \
+      --border-foreground="$COLOR_PRIMARY" \
+      --padding="1 4" \
+      --width=50 \
+      --align="center" \
+      "Git Branch Delete v$VERSION"
+    echo ""
+  else
+    # Fallback sem gum
+    cat <<EOF
+╔════════════════════════════════════════════════╗
+║     Git Branch Delete v$VERSION                 ║
+╚════════════════════════════════════════════════╝
+EOF
+    echo ""
+  fi
+}
+
+# Exibir mensagem contextual
+show_context_message() {
+  local message="$1"
+
+  if command -v gum &> /dev/null; then
+    gum style --foreground="$COLOR_INFO" --italic "$message"
+    echo ""
+  else
+    # Fallback sem gum
+    echo "ℹ️  $message"
+    echo ""
+  fi
+}
+
+#============================================================
+# ENTRY POINT (parcial - para Stories S1-S3)
 #============================================================
 
 main() {
@@ -287,8 +407,25 @@ Versão: $VERSION"
     echo "✅ Inicialização OK - Branch base: $BASE_BRANCH"
   fi
 
-  # Testar funções Git (Story S2)
+  # Testar funções UI (Story S3)
   echo ""
+  echo "🧪 Testando funções UI..."
+  echo ""
+
+  # Testar show_banner
+  echo "1️⃣ Testando show_banner():"
+  show_banner
+
+  # Testar show_context_message
+  echo "2️⃣ Testando show_context_message():"
+  show_context_message "Esta é uma mensagem contextual de teste"
+
+  # Testar show_help_screen
+  echo "3️⃣ Para testar show_help_screen(), execute:"
+  echo "   bash git/git-delete-branches/git-delete-branches-v2.sh --help"
+  echo ""
+
+  # Testar funções Git (Story S2)
   echo "🧪 Testando funções Git Operations..."
   echo ""
 
