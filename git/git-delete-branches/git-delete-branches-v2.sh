@@ -457,23 +457,26 @@ EOF
 # Exibir banner inicial (output vai para stderr quando chamado de subshell)
 show_banner() {
   if command -v gum &> /dev/null; then
-    gum style \
+    # Usar printf para garantir output limpo sem interferência
+    local banner
+    banner=$(gum style \
       --foreground="$COLOR_PRIMARY" \
       --border="rounded" \
       --border-foreground="$COLOR_PRIMARY" \
       --padding="1 4" \
-      --width=50 \
+      --width=60 \
       --align="center" \
-      "Git Branch Delete v$VERSION" || true
-    echo ""
+      --margin="1 0" \
+      "Git Branch Delete v$VERSION") || true
+    printf '%s\n' "$banner"
   else
     # Fallback sem gum
     cat <<EOF
-╔════════════════════════════════════════════════╗
-║     Git Branch Delete v$VERSION                 ║
-╚════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════╗
+║              Git Branch Delete v$VERSION               ║
+╚════════════════════════════════════════════════════════╝
+
 EOF
-    echo ""
   fi
 }
 
@@ -482,12 +485,12 @@ show_context_message() {
   local message="$1"
 
   if command -v gum &> /dev/null; then
-    gum style --foreground="$COLOR_INFO" "$message" || echo "ℹ️  $message"
-    echo ""
+    local styled_msg
+    styled_msg=$(gum style --foreground="$COLOR_INFO" "$message") || styled_msg="ℹ️  $message"
+    printf '\n\n%s\n\n' "$styled_msg"
   else
     # Fallback sem gum
-    echo "ℹ️  $message"
-    echo ""
+    printf '\n\nℹ️  %s\n\n' "$message"
   fi
 }
 
@@ -509,6 +512,7 @@ show_main_menu() {
       --selected.foreground="$COLOR_SUCCESS" \
       --cursor.foreground="$COLOR_PRIMARY" \
       "Deletar branches" \
+      "Ver detalhes de branch" \
       "Ver branches protegidas" \
       "Ajuda" \
       "Exit") || MENU_CHOICE="Exit"
@@ -517,18 +521,20 @@ show_main_menu() {
     cat <<EOF
 Menu Principal:
   1) Deletar branches
-  2) Ver branches protegidas
-  3) Ajuda
-  4) Exit
+  2) Ver detalhes de branch
+  3) Ver branches protegidas
+  4) Ajuda
+  5) Exit
 EOF
     echo ""
-    read -p "Escolha uma opção (1-4): " choice
+    read -p "Escolha uma opção (1-5): " choice
 
     case "$choice" in
       1) MENU_CHOICE="Deletar branches" ;;
-      2) MENU_CHOICE="Ver branches protegidas" ;;
-      3) MENU_CHOICE="Ajuda" ;;
-      4) MENU_CHOICE="Exit" ;;
+      2) MENU_CHOICE="Ver detalhes de branch" ;;
+      3) MENU_CHOICE="Ver branches protegidas" ;;
+      4) MENU_CHOICE="Ajuda" ;;
+      5) MENU_CHOICE="Exit" ;;
       *) MENU_CHOICE="Exit" ;;
     esac
   fi
@@ -579,13 +585,105 @@ EOF
   fi
 }
 
+# Exibir detalhes de uma branch
+show_branch_details() {
+  local base_branch
+  base_branch=$(detect_base_branch)
+
+  clear
+  show_banner
+
+  # Listar todas as branches locais
+  local all_branches
+  all_branches=$(git branch --format="%(refname:short)" | sed 's/^[ \t]*//;s/[ \t]*$//')
+
+  if [ -z "$all_branches" ]; then
+    if command -v gum &> /dev/null; then
+      gum style \
+        --foreground="$COLOR_WARNING" \
+        "⚠️  Nenhuma branch encontrada"
+      echo ""
+      gum confirm "Voltar ao menu?" --default=yes --affirmative="Sim" --negative="Não" || return
+    else
+      echo "⚠️  Nenhuma branch encontrada"
+      read -p "Pressione ENTER para voltar..."
+    fi
+    return
+  fi
+
+  # Adicionar opção de voltar
+  local options="← Voltar"$'\n'"$all_branches"
+
+  if command -v gum &> /dev/null; then
+    gum style \
+      --margin="1 0 1 1" \
+      --foreground="$COLOR_INFO" "Selecione uma branch para ver detalhes:"
+    printf '\n'
+
+    local selected
+    selected=$(echo "$options" | gum filter \
+      --placeholder="Digite para filtrar..." \
+      --indicator=">" \
+      --height=15) || return
+
+    # Se selecionou Voltar ou cancelou
+    if [ -z "$selected" ] || [ "$selected" = "← Voltar" ]; then
+      return
+    fi
+
+    # Mostrar detalhes da branch
+    clear
+    show_banner
+
+    generate_branch_preview "$selected" "$base_branch"
+
+    echo ""
+    gum confirm "Voltar ao menu?" --default=yes --affirmative="Sim" --negative="Não" || return
+  else
+    # Fallback sem gum
+    echo "Branches disponíveis:"
+    echo "  0) ← Voltar"
+    echo ""
+
+    local -a branch_array
+    local index=1
+    while IFS= read -r branch; do
+      echo "  $index) $branch"
+      branch_array[$index]="$branch"
+      ((index++))
+    done <<< "$all_branches"
+
+    echo ""
+    read -p "Escolha uma branch (0 para voltar): " choice
+
+    if [ "$choice" = "0" ] || [ -z "$choice" ]; then
+      return
+    fi
+
+    if [ "$choice" -gt 0 ] && [ "$choice" -lt "$index" ]; then
+      local selected="${branch_array[$choice]}"
+      clear
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo "Detalhes da branch: $selected"
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      generate_branch_preview "$selected" "$base_branch"
+      echo ""
+      read -p "Pressione ENTER para voltar..."
+    fi
+  fi
+}
+
 # Seleção de branches para deletar
 select_branches_to_delete() {
   local base_branch="$1"
 
-  clear
-  show_banner
-  show_context_message "Use ↑↓ para navegar, SPACE para selecionar, ENTER para confirmar"
+  clear >&2
+  show_banner >&2
+  gum style \
+      --margin="1 0 1 1"\
+    --foreground="$COLOR_INFO" "Use ↑↓ para navegar, SPACE para selecionar, ENTER para confirmar" >&2
+  printf '\n' >&2
 
   # Obter branches candidatas
   local candidates
@@ -597,12 +695,12 @@ select_branches_to_delete() {
         --foreground="$COLOR_WARNING" \
         --border="rounded" \
         --padding="1 2" \
-        "⚠️  Nenhuma branch disponível para deletar"
-      echo ""
+        "⚠️  Nenhuma branch disponível para deletar" >&2
+      echo "" >&2
       gum confirm "Voltar ao menu?" --default=yes || return
     else
-      echo "⚠️  Nenhuma branch disponível para deletar"
-      echo ""
+      echo "⚠️  Nenhuma branch disponível para deletar" >&2
+      echo "" >&2
       read -p "Pressione ENTER para voltar..."
     fi
     return 1
@@ -616,7 +714,8 @@ select_branches_to_delete() {
     local selected
     selected=$(echo "$options" | gum filter \
       --placeholder="Digite para filtrar... (ESC para voltar)" \
-      --indicator="●" \
+      --indicator=">" \
+      --height=15 \
       --no-limit) || {
       # Se cancelou (ESC), retornar erro
       return 1
@@ -667,20 +766,31 @@ confirm_deletion() {
   local count
   count=$(echo "$branches" | wc -l)
 
-  echo ""
-
   if command -v gum &> /dev/null; then
-    gum style \
-      --foreground="$COLOR_WARNING" \
-      --bold \
-      "⚠️  Deletar $count branch(es) selecionada(s)?"
+    clear
 
-    echo ""
-    gum style --foreground="$COLOR_ERROR" "Branches que serão DELETADAS:"
-    echo "$branches" | while read -r branch; do
-      gum style --foreground="$COLOR_ERROR" "  • $branch"
-    done
-    echo ""
+    # Banner
+    gum style \
+      --foreground="$COLOR_PRIMARY" \
+      --border="rounded" \
+      --border-foreground="$COLOR_PRIMARY" \
+      --padding="1 4" \
+      --width=60 \
+      --align="center" \
+      --margin="1 0" \
+      "Git Branch Delete v$VERSION"
+
+    printf '\n'
+    printf '⚠️  Deletar %d branch(es) selecionada(s)?\n' "$count"
+    printf '\n'
+    printf 'Branches que serão DELETADAS:\n'
+    printf '\n'
+
+    while IFS= read -r branch; do
+      [ -n "$branch" ] && printf '  ● %s\n' "$branch"
+    done <<< "$branches"
+
+    printf '\n'
 
     gum confirm \
       "Confirmar deleção?" \
@@ -689,11 +799,16 @@ confirm_deletion() {
       --negative="Não, cancelar"
   else
     # Fallback sem gum
+    clear
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Git Branch Delete v$VERSION"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
     echo "⚠️  Deletar $count branch(es) selecionada(s)?"
     echo ""
     echo "Branches que serão DELETADAS:"
     echo "$branches" | while read -r branch; do
-      echo "  • $branch"
+      echo "  $branch"
     done
     echo ""
 
@@ -820,6 +935,10 @@ main_loop() {
         if confirm_deletion "$selected_branches"; then
           delete_branches "$selected_branches"
         fi
+        ;;
+
+      "Ver detalhes de branch")
+        show_branch_details
         ;;
 
       "Ver branches protegidas")
