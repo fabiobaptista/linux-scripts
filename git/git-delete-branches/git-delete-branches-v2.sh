@@ -257,6 +257,103 @@ generate_branch_preview() {
 }
 
 #============================================================
+# ERROR HANDLING & VALIDATION
+#============================================================
+
+# Validar se branch existe
+validate_branch_exists() {
+  local branch="$1"
+
+  if ! git show-ref --verify --quiet "refs/heads/$branch"; then
+    if command -v gum &> /dev/null; then
+      gum style \
+        --foreground="$COLOR_ERROR" \
+        "❌ Branch '$branch' não existe"
+    else
+      echo "❌ Branch '$branch' não existe"
+    fi
+    return 1
+  fi
+
+  return 0
+}
+
+# Validar se branch está protegida
+validate_not_protected() {
+  local branch="$1"
+
+  for protected in "${PROTECTED_BRANCHES[@]}"; do
+    if [ "$branch" = "$protected" ]; then
+      if command -v gum &> /dev/null; then
+        gum style \
+          --foreground="$COLOR_ERROR" \
+          "❌ Branch '$branch' está protegida e não pode ser deletada"
+      else
+        echo "❌ Branch '$branch' está protegida e não pode ser deletada"
+      fi
+      return 1
+    fi
+  done
+
+  return 0
+}
+
+# Prevenir exclusão da branch atual
+check_current_branch() {
+  local branch="$1"
+  local current_branch
+  current_branch=$(git branch --show-current)
+
+  if [ "$branch" = "$current_branch" ]; then
+    if command -v gum &> /dev/null; then
+      gum style \
+        --foreground="$COLOR_ERROR" \
+        --border="rounded" \
+        --padding="1 2" \
+        "❌ Erro: Não é possível deletar a branch atual ($current_branch)
+
+Mude para outra branch primeiro:
+  git checkout main"
+    else
+      echo "❌ Erro: Não é possível deletar a branch atual ($current_branch)"
+      echo ""
+      echo "Mude para outra branch primeiro:"
+      echo "  git checkout main"
+    fi
+    return 1
+  fi
+
+  return 0
+}
+
+# Executar comando git com tratamento de erro
+safe_git_command() {
+  local output
+  local exit_code
+
+  output=$(git "$@" 2>&1)
+  exit_code=$?
+
+  if [ $exit_code -ne 0 ]; then
+    if command -v gum &> /dev/null; then
+      gum style \
+        --foreground="$COLOR_ERROR" \
+        --border="rounded" \
+        --padding="1 2" \
+        "❌ Erro no comando git:
+
+$output"
+    else
+      echo "❌ Erro no comando git: $output"
+    fi
+    return $exit_code
+  fi
+
+  echo "$output"
+  return 0
+}
+
+#============================================================
 # UI UTILITY FUNCTIONS
 #============================================================
 
@@ -600,10 +697,28 @@ delete_branches() {
 
   local success=0
   local failed=0
+  local skipped=0
 
   while IFS= read -r branch; do
     [ -z "$branch" ] && continue
 
+    # Validações de segurança
+    if ! validate_branch_exists "$branch"; then
+      ((skipped++))
+      continue
+    fi
+
+    if ! validate_not_protected "$branch"; then
+      ((skipped++))
+      continue
+    fi
+
+    if ! check_current_branch "$branch"; then
+      ((skipped++))
+      continue
+    fi
+
+    # Tentar deletar
     if git branch -D "$branch" &> /dev/null; then
       if command -v gum &> /dev/null; then
         gum style --foreground="$COLOR_SUCCESS" "✓ $branch deletada"
@@ -633,6 +748,7 @@ $(gum style --bold --foreground="$COLOR_SUCCESS" "Concluído!")
 
 Branches deletadas: $success
 $([ $failed -gt 0 ] && echo "Falhas: $failed")
+$([ $skipped -gt 0 ] && echo "Ignoradas (validação): $skipped")
 EOF
 )"
   else
@@ -642,6 +758,7 @@ Concluído!
 
 Branches deletadas: $success
 $([ $failed -gt 0 ] && echo "Falhas: $failed")
+$([ $skipped -gt 0 ] && echo "Ignoradas (validação): $skipped")
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 EOF
   fi
