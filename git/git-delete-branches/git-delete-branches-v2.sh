@@ -651,7 +651,65 @@ EOF
 }
 
 #============================================================
-# ENTRY POINT (parcial - para Stories S1-S4)
+# MAIN LOOP
+#============================================================
+
+main_loop() {
+  local base_branch
+  base_branch=$(detect_base_branch)
+
+  while true; do
+    # Mostrar menu principal
+    local menu_choice
+    menu_choice=$(show_main_menu)
+
+    case "$menu_choice" in
+      "Deletar branches")
+        # Selecionar branches
+        local selected_branches
+        selected_branches=$(select_branches_to_delete "$base_branch")
+
+        # Se cancelou ou selecionou Exit
+        if [ $? -ne 0 ] || [ -z "$selected_branches" ]; then
+          continue
+        fi
+
+        # Confirmar deleção
+        if confirm_deletion "$selected_branches"; then
+          delete_branches "$selected_branches"
+        fi
+        ;;
+
+      "Ver branches protegidas")
+        show_protected_branches
+        ;;
+
+      "Ajuda")
+        show_help_screen
+        ;;
+
+      "Exit")
+        clear
+        if command -v gum &> /dev/null; then
+          gum style \
+            --foreground="$COLOR_SUCCESS" \
+            "👋 Até logo!"
+        else
+          echo "👋 Até logo!"
+        fi
+        exit 0
+        ;;
+
+      *)
+        # ESC ou cancelamento
+        exit 0
+        ;;
+    esac
+  done
+}
+
+#============================================================
+# ENTRY POINT
 #============================================================
 
 main() {
@@ -664,63 +722,8 @@ main() {
   # Detectar branch base
   BASE_BRANCH=$(detect_base_branch)
 
-  # Testar se tudo funcionou
-  if command -v gum &> /dev/null; then
-    gum style \
-      --foreground="$COLOR_SUCCESS" \
-      --border="rounded" \
-      --padding="1 2" \
-      "✅ Inicialização concluída com sucesso!
-
-Branch base detectada: $BASE_BRANCH
-Branches protegidas: ${PROTECTED_BRANCHES[*]}
-Padrões de exclusão: ${EXCLUDE_PATTERNS[*]:-nenhum}
-
-Versão: $VERSION"
-  else
-    echo "✅ Inicialização OK - Branch base: $BASE_BRANCH"
-  fi
-
-  # Testar funções UI (Story S3)
-  echo ""
-  echo "🧪 Testando funções UI..."
-  echo ""
-
-  # Testar show_banner
-  echo "1️⃣ Testando show_banner():"
-  show_banner
-
-  # Testar show_context_message
-  echo "2️⃣ Testando show_context_message():"
-  show_context_message "Esta é uma mensagem contextual de teste"
-
-  # Testar show_help_screen
-  echo "3️⃣ Para testar show_help_screen(), execute:"
-  echo "   bash git/git-delete-branches/git-delete-branches-v2.sh --help"
-  echo ""
-
-  # Testar funções Git (Story S2)
-  echo "🧪 Testando funções Git Operations..."
-  echo ""
-
-  # Listar branches candidatas
-  echo "📋 Branches candidatas para deleção:"
-  local candidates
-  candidates=$(get_candidate_branches)
-  if [ -n "$candidates" ]; then
-    echo "$candidates"
-
-    # Testar get_branch_info e generate_branch_preview com a primeira branch
-    local first_branch
-    first_branch=$(echo "$candidates" | head -1)
-
-    echo ""
-    echo "📊 Preview da branch: $first_branch"
-    echo ""
-    generate_branch_preview "$first_branch" "$BASE_BRANCH"
-  else
-    echo "  (nenhuma branch disponível para deleção)"
-  fi
+  # Entrar no loop principal
+  main_loop
 }
 
 # Executar
