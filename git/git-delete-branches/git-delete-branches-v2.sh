@@ -8,7 +8,7 @@
 #              with modern TUI using gum
 #============================================================
 
-set -euo pipefail  # Exit on error, undefined vars, pipe failures
+set -uo pipefail  # Undefined vars, pipe failures (removed -e for gum compatibility)
 
 #============================================================
 # CONSTANTS & CONFIGURATION
@@ -36,6 +36,24 @@ readonly MAX_FILES_PREVIEW=10
 
 # Branch base para comparação (detecta automaticamente)
 BASE_BRANCH=""
+
+# Variável global para retorno do menu (evita problemas com subshell)
+MENU_CHOICE=""
+
+#============================================================
+# GUM WRAPPER FOR WINDOWS TERMINAL/WSL2 COMPATIBILITY
+#============================================================
+
+# Wrapper para executar gum commands com error handling
+# Isso resolve problemas com Windows Terminal + WSL2
+safe_gum() {
+  local exit_code
+  set +e  # Desabilita temporariamente exit on error
+  "$@" 2>/dev/null  # Executa o comando (gum style, gum choose, etc)
+  exit_code=$?
+  set -e  # Reabilita exit on error
+  return $exit_code
+}
 
 #============================================================
 # DEPENDENCY CHECK
@@ -436,7 +454,7 @@ EOF
   fi
 }
 
-# Exibir banner inicial
+# Exibir banner inicial (output vai para stderr quando chamado de subshell)
 show_banner() {
   if command -v gum &> /dev/null; then
     gum style \
@@ -446,7 +464,7 @@ show_banner() {
       --padding="1 4" \
       --width=50 \
       --align="center" \
-      "Git Branch Delete v$VERSION"
+      "Git Branch Delete v$VERSION" || true
     echo ""
   else
     # Fallback sem gum
@@ -464,7 +482,7 @@ show_context_message() {
   local message="$1"
 
   if command -v gum &> /dev/null; then
-    gum style --foreground="$COLOR_INFO" --italic "$message"
+    gum style --foreground="$COLOR_INFO" "$message" || echo "ℹ️  $message"
     echo ""
   else
     # Fallback sem gum
@@ -477,23 +495,23 @@ show_context_message() {
 # UI FUNCTIONS - Menu & Selection
 #============================================================
 
-# Menu principal
+# Menu principal - retorna escolha via variável global MENU_CHOICE
 show_main_menu() {
+  MENU_CHOICE=""
+
   clear
   show_banner
 
   if command -v gum &> /dev/null; then
-    local choice
-    choice=$(gum choose \
+    MENU_CHOICE=$(gum choose \
       --header="Menu Principal" \
       --header.foreground="$COLOR_PRIMARY" \
       --selected.foreground="$COLOR_SUCCESS" \
+      --cursor.foreground="$COLOR_PRIMARY" \
       "Deletar branches" \
       "Ver branches protegidas" \
       "Ajuda" \
-      "Exit")
-
-    echo "$choice"
+      "Exit") || MENU_CHOICE="Exit"
   else
     # Fallback sem gum
     cat <<EOF
@@ -507,11 +525,11 @@ EOF
     read -p "Escolha uma opção (1-4): " choice
 
     case "$choice" in
-      1) echo "Deletar branches" ;;
-      2) echo "Ver branches protegidas" ;;
-      3) echo "Ajuda" ;;
-      4) echo "Exit" ;;
-      *) echo "" ;; # Cancelado
+      1) MENU_CHOICE="Deletar branches" ;;
+      2) MENU_CHOICE="Ver branches protegidas" ;;
+      3) MENU_CHOICE="Ajuda" ;;
+      4) MENU_CHOICE="Exit" ;;
+      *) MENU_CHOICE="Exit" ;;
     esac
   fi
 }
@@ -779,27 +797,22 @@ main_loop() {
   base_branch=$(detect_base_branch)
 
   while true; do
-    # Mostrar menu principal
-    local menu_choice
-    menu_choice=$(show_main_menu) || {
-      # Se cancelou (ESC), sair
-      clear
-      if command -v gum &> /dev/null; then
-        gum style --foreground="$COLOR_SUCCESS" "👋 Até logo!"
-      else
-        echo "👋 Até logo!"
-      fi
-      exit 0
-    }
+    # Mostrar menu principal (resultado em MENU_CHOICE)
+    show_main_menu
 
-    case "$menu_choice" in
+    # Debug: descomentar para ver o que está sendo retornado
+    # echo "DEBUG: MENU_CHOICE='$MENU_CHOICE'" && sleep 2
+
+    case "$MENU_CHOICE" in
       "Deletar branches")
         # Selecionar branches
         local selected_branches
+        local select_exit_code
         selected_branches=$(select_branches_to_delete "$base_branch")
+        select_exit_code=$?
 
         # Se cancelou ou selecionou Exit
-        if [ $? -ne 0 ] || [ -z "$selected_branches" ]; then
+        if [ $select_exit_code -ne 0 ] || [ -z "$selected_branches" ]; then
           continue
         fi
 
@@ -829,9 +842,9 @@ main_loop() {
         exit 0
         ;;
 
-      *)
-        # ESC ou cancelamento
-        exit 0
+      ""|*)
+        # ESC, cancelamento ou entrada vazia - voltar ao menu
+        continue
         ;;
     esac
   done
