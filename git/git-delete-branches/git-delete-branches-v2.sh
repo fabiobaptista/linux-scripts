@@ -370,30 +370,30 @@ show_help_screen() {
       "$(cat <<EOF
           AJUDA - Git Branch Delete
 
-$(gum style --bold --foreground="$COLOR_SUCCESS" "Navegação:")
+Navegação:
   ↑↓        Mover entre opções
   SPACE     Selecionar/desselecionar
   ENTER     Confirmar seleção
   ESC       Voltar
   CTRL+C    Sair do script
 
-$(gum style --bold --foreground="$COLOR_SUCCESS" "Branches Protegidas:")
+Branches Protegidas:
 $(printf '  • %s\n' "${PROTECTED_BRANCHES[@]}")
 
-$(gum style --bold --foreground="$COLOR_SUCCESS" "Argumentos CLI:")
+Argumentos CLI:
   ./git-delete-branches.sh [padrão1] [padrão2]
 
   Exemplo: ./git-delete-branches.sh 1234 hotfix
   (exclui branches contendo "1234" ou "hotfix")
 
-$(gum style --bold --foreground="$COLOR_SUCCESS" "Instalação do gum:")
+Instalação do gum:
   Ubuntu/Debian:
     https://github.com/charmbracelet/gum#installation
 
   macOS:
     brew install gum
 
-$(gum style --bold --foreground="$COLOR_INFO" "Versão: $VERSION")
+Versão: $VERSION
 EOF
 )"
 
@@ -485,7 +485,7 @@ show_main_menu() {
   if command -v gum &> /dev/null; then
     local choice
     choice=$(gum choose \
-      --header="$(gum style --bold 'Menu Principal')" \
+      --header="Menu Principal" \
       --header.foreground="$COLOR_PRIMARY" \
       --selected.foreground="$COLOR_SUCCESS" \
       "Deletar branches" \
@@ -526,7 +526,7 @@ show_protected_branches() {
       --border-foreground="$COLOR_WARNING" \
       --padding="1 2" \
       "$(cat <<EOF
-$(gum style --bold --foreground="$COLOR_WARNING" "Branches Protegidas")
+Branches Protegidas
 
 Estas branches NUNCA serão deletadas:
 
@@ -747,7 +747,7 @@ delete_branches() {
       --border-foreground="$COLOR_SUCCESS" \
       --padding="1 2" \
       "$(cat <<EOF
-$(gum style --bold --foreground="$COLOR_SUCCESS" "Concluído!")
+Concluído!
 
 Branches deletadas: $success
 $([ $failed -gt 0 ] && echo "Falhas: $failed")
