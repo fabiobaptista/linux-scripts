@@ -106,7 +106,158 @@ check_git_repo() {
 }
 
 #============================================================
-# ENTRY POINT (parcial - apenas para Story S1)
+# GIT UTILITY FUNCTIONS
+#============================================================
+
+# Lista todas as branches locais (exceto protegidas e padrões de exclusão)
+get_candidate_branches() {
+  local all_excludes=("${PROTECTED_BRANCHES[@]}" "${EXCLUDE_PATTERNS[@]}")
+
+  # Criar regex de exclusão
+  local exclude_regex
+  exclude_regex=$(printf "%s|" "${all_excludes[@]}")
+  exclude_regex="${exclude_regex%|}"
+
+  # Listar branches filtradas
+  git branch --format="%(refname:short)" \
+    | sed 's/^[ \t]*//;s/[ \t]*$//' \
+    | grep -v -E "$exclude_regex" || true
+}
+
+# Obter informações completas sobre uma branch
+get_branch_info() {
+  local branch="$1"
+  local base_branch="$2"
+
+  # Autor e data do último commit
+  local last_commit_info
+  last_commit_info=$(git log -1 --format="%an|%ad|%ar" --date=format:"%Y-%m-%d %H:%M" "$branch" 2>/dev/null || echo "Unknown|Unknown|Unknown")
+
+  local author last_date relative_date
+  IFS='|' read -r author last_date relative_date <<< "$last_commit_info"
+
+  # Data de criação da branch (primeiro commit)
+  local creation_date
+  creation_date=$(git log --reverse --format="%ad" --date=format:"%Y-%m-%d %H:%M" "$branch" 2>/dev/null | head -1 || echo "Unknown")
+
+  # Commits à frente e atrás da base
+  local ahead behind
+  ahead=$(git rev-list --count "$base_branch".."$branch" 2>/dev/null || echo "0")
+  behind=$(git rev-list --count "$branch".."$base_branch" 2>/dev/null || echo "0")
+
+  # Status de merge
+  local merge_status="Not merged"
+  if git merge-base --is-ancestor "$branch" "$base_branch" 2>/dev/null; then
+    merge_status="✓ Merged"
+  fi
+
+  # Arquivos modificados (últimos commits)
+  local modified_files
+  modified_files=$(git diff --name-only "$base_branch"..."$branch" 2>/dev/null | head -n "$MAX_FILES_PREVIEW" || echo "")
+
+  # Retornar info (output para parsing)
+  echo "AUTHOR=$author"
+  echo "LAST_DATE=$last_date"
+  echo "RELATIVE_DATE=$relative_date"
+  echo "CREATION_DATE=$creation_date"
+  echo "AHEAD=$ahead"
+  echo "BEHIND=$behind"
+  echo "MERGE_STATUS=$merge_status"
+  echo "MODIFIED_FILES_START"
+  echo "$modified_files"
+  echo "MODIFIED_FILES_END"
+}
+
+# Gerar preview completo de uma branch para o gum
+generate_branch_preview() {
+  local branch="$1"
+  local base_branch="$2"
+
+  # Obter informações
+  local info
+  info=$(get_branch_info "$branch" "$base_branch")
+
+  # Parse das informações
+  local author last_date relative_date creation_date ahead behind merge_status modified_files
+  local in_files=false
+  modified_files=""
+
+  while IFS= read -r line; do
+    if [[ "$line" == "MODIFIED_FILES_START" ]]; then
+      in_files=true
+      continue
+    elif [[ "$line" == "MODIFIED_FILES_END" ]]; then
+      in_files=false
+      continue
+    fi
+
+    if [[ "$in_files" == true ]]; then
+      modified_files+="$line"$'\n'
+    else
+      case "$line" in
+        AUTHOR=*) author="${line#AUTHOR=}" ;;
+        LAST_DATE=*) last_date="${line#LAST_DATE=}" ;;
+        RELATIVE_DATE=*) relative_date="${line#RELATIVE_DATE=}" ;;
+        CREATION_DATE=*) creation_date="${line#CREATION_DATE=}" ;;
+        AHEAD=*) ahead="${line#AHEAD=}" ;;
+        BEHIND=*) behind="${line#BEHIND=}" ;;
+        MERGE_STATUS=*) merge_status="${line#MERGE_STATUS=}" ;;
+      esac
+    fi
+  done <<< "$info"
+
+  # Gerar preview formatado
+  if command -v gum &> /dev/null; then
+    gum style \
+      --foreground="$COLOR_PRIMARY" \
+      --bold \
+      "Branch: $branch"
+
+    echo ""
+    gum style --foreground="$COLOR_INFO" "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+
+    gum style --foreground="$COLOR_WARNING" "📅 Criada: $creation_date"
+    gum style --foreground="$COLOR_WARNING" "👤 Último autor: $author"
+    gum style --foreground="$COLOR_WARNING" "📝 Último commit: $last_date ($relative_date)"
+
+    echo ""
+    gum style --foreground="$COLOR_INFO" "📊 Status:"
+    gum style "  • $ahead commits à frente de $base_branch"
+    gum style "  • $behind commits atrás de $base_branch"
+    gum style "  • Estado: $merge_status"
+
+    echo ""
+
+    # Arquivos modificados
+    if [ -n "$modified_files" ]; then
+      gum style --foreground="$COLOR_INFO" "📁 Arquivos modificados (últimos $MAX_FILES_PREVIEW):"
+      echo "$modified_files" | while read -r file; do
+        [ -n "$file" ] && gum style "  • $file"
+      done
+      echo ""
+    fi
+
+    # Commits recentes
+    gum style --foreground="$COLOR_INFO" "📋 Commits recentes (últimos $MAX_COMMITS_PREVIEW):"
+    git log --oneline --graph --max-count="$MAX_COMMITS_PREVIEW" --color=always "$branch" 2>/dev/null || echo "  (sem commits)"
+  else
+    # Fallback sem gum
+    echo "Branch: $branch"
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo "Criada: $creation_date"
+    echo "Último autor: $author"
+    echo "Último commit: $last_date ($relative_date)"
+    echo ""
+    echo "Status:"
+    echo "  • $ahead commits à frente de $base_branch"
+    echo "  • $behind commits atrás de $base_branch"
+    echo "  • Estado: $merge_status"
+  fi
+}
+
+#============================================================
+# ENTRY POINT (parcial - apenas para Story S1-S2)
 #============================================================
 
 main() {
@@ -134,6 +285,30 @@ Padrões de exclusão: ${EXCLUDE_PATTERNS[*]:-nenhum}
 Versão: $VERSION"
   else
     echo "✅ Inicialização OK - Branch base: $BASE_BRANCH"
+  fi
+
+  # Testar funções Git (Story S2)
+  echo ""
+  echo "🧪 Testando funções Git Operations..."
+  echo ""
+
+  # Listar branches candidatas
+  echo "📋 Branches candidatas para deleção:"
+  local candidates
+  candidates=$(get_candidate_branches)
+  if [ -n "$candidates" ]; then
+    echo "$candidates"
+
+    # Testar get_branch_info e generate_branch_preview com a primeira branch
+    local first_branch
+    first_branch=$(echo "$candidates" | head -1)
+
+    echo ""
+    echo "📊 Preview da branch: $first_branch"
+    echo ""
+    generate_branch_preview "$first_branch" "$BASE_BRANCH"
+  else
+    echo "  (nenhuma branch disponível para deleção)"
   fi
 }
 
