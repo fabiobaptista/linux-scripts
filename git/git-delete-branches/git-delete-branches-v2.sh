@@ -377,7 +377,281 @@ show_context_message() {
 }
 
 #============================================================
-# ENTRY POINT (parcial - para Stories S1-S3)
+# UI FUNCTIONS - Menu & Selection
+#============================================================
+
+# Menu principal
+show_main_menu() {
+  clear
+  show_banner
+
+  if command -v gum &> /dev/null; then
+    local choice
+    choice=$(gum choose \
+      --header="$(gum style --bold 'Menu Principal')" \
+      --header.foreground="$COLOR_PRIMARY" \
+      --selected.foreground="$COLOR_SUCCESS" \
+      "Deletar branches" \
+      "Ver branches protegidas" \
+      "Ajuda" \
+      "Exit")
+
+    echo "$choice"
+  else
+    # Fallback sem gum
+    cat <<EOF
+Menu Principal:
+  1) Deletar branches
+  2) Ver branches protegidas
+  3) Ajuda
+  4) Exit
+EOF
+    echo ""
+    read -p "Escolha uma opção (1-4): " choice
+
+    case "$choice" in
+      1) echo "Deletar branches" ;;
+      2) echo "Ver branches protegidas" ;;
+      3) echo "Ajuda" ;;
+      4) echo "Exit" ;;
+      *) echo "" ;; # Cancelado
+    esac
+  fi
+}
+
+# Exibir branches protegidas
+show_protected_branches() {
+  clear
+
+  if command -v gum &> /dev/null; then
+    gum style \
+      --border="rounded" \
+      --border-foreground="$COLOR_WARNING" \
+      --padding="1 2" \
+      "$(cat <<EOF
+$(gum style --bold --foreground="$COLOR_WARNING" "Branches Protegidas")
+
+Estas branches NUNCA serão deletadas:
+
+$(printf '  • %s\n' "${PROTECTED_BRANCHES[@]}")
+
+$([ ${#EXCLUDE_PATTERNS[@]} -gt 0 ] && echo -e "\nPadrões de exclusão (CLI):\n$(printf '  • %s\n' "${EXCLUDE_PATTERNS[@]}")")
+EOF
+)"
+
+    echo ""
+    gum confirm "Voltar ao menu?" --default=yes --affirmative="Sim" --negative="Não" || return
+  else
+    # Fallback sem gum
+    cat <<EOF
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Branches Protegidas
+
+Estas branches NUNCA serão deletadas:
+
+$(printf '  • %s\n' "${PROTECTED_BRANCHES[@]}")
+EOF
+
+    if [ ${#EXCLUDE_PATTERNS[@]} -gt 0 ]; then
+      echo ""
+      echo "Padrões de exclusão (CLI):"
+      printf '  • %s\n' "${EXCLUDE_PATTERNS[@]}"
+    fi
+
+    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+    echo ""
+    read -p "Pressione ENTER para voltar..."
+  fi
+}
+
+# Seleção de branches para deletar
+select_branches_to_delete() {
+  local base_branch="$1"
+
+  clear
+  show_banner
+  show_context_message "Use ↑↓ para navegar, SPACE para selecionar, ENTER para confirmar"
+
+  # Obter branches candidatas
+  local candidates
+  candidates=$(get_candidate_branches)
+
+  if [ -z "$candidates" ]; then
+    if command -v gum &> /dev/null; then
+      gum style \
+        --foreground="$COLOR_WARNING" \
+        --border="rounded" \
+        --padding="1 2" \
+        "⚠️  Nenhuma branch disponível para deletar"
+      echo ""
+      gum confirm "Voltar ao menu?" --default=yes || return
+    else
+      echo "⚠️  Nenhuma branch disponível para deletar"
+      echo ""
+      read -p "Pressione ENTER para voltar..."
+    fi
+    return 1
+  fi
+
+  # Adicionar opção "← Exit" no topo
+  local options="← Exit"$'\n'"$candidates"
+
+  if command -v gum &> /dev/null; then
+    # Seleção com gum filter (permite múltipla seleção)
+    local selected
+    selected=$(echo "$options" | gum filter \
+      --placeholder="Digite para filtrar... (ESC para voltar)" \
+      --indicator="●" \
+      --no-limit)
+
+    # Se selecionou Exit ou cancelou
+    if [ -z "$selected" ] || echo "$selected" | grep -q "← Exit"; then
+      return 1
+    fi
+
+    echo "$selected"
+  else
+    # Fallback sem gum - lista numerada
+    echo "Branches disponíveis para deleção:"
+    echo "  0) ← Exit (voltar)"
+    echo ""
+
+    local -a branch_array
+    local index=1
+    while IFS= read -r branch; do
+      echo "  $index) $branch"
+      branch_array[$index]="$branch"
+      ((index++))
+    done <<< "$candidates"
+
+    echo ""
+    read -p "Digite os números das branches separados por espaço (ex: 1 3 5): " selections
+
+    if [ -z "$selections" ] || [[ "$selections" == *"0"* ]]; then
+      return 1
+    fi
+
+    # Converter seleções em branches
+    local selected_branches=""
+    for num in $selections; do
+      if [ "$num" -gt 0 ] && [ "$num" -lt "$index" ]; then
+        selected_branches+="${branch_array[$num]}"$'\n'
+      fi
+    done
+
+    echo "${selected_branches%$'\n'}"
+  fi
+}
+
+# Confirmação de deleção
+confirm_deletion() {
+  local branches="$1"
+  local count
+  count=$(echo "$branches" | wc -l)
+
+  echo ""
+
+  if command -v gum &> /dev/null; then
+    gum style \
+      --foreground="$COLOR_WARNING" \
+      --bold \
+      "⚠️  Deletar $count branch(es) selecionada(s)?"
+
+    echo ""
+    gum style --foreground="$COLOR_ERROR" "Branches que serão DELETADAS:"
+    echo "$branches" | while read -r branch; do
+      gum style --foreground="$COLOR_ERROR" "  • $branch"
+    done
+    echo ""
+
+    gum confirm \
+      "Confirmar deleção?" \
+      --default=no \
+      --affirmative="Sim, deletar" \
+      --negative="Não, cancelar"
+  else
+    # Fallback sem gum
+    echo "⚠️  Deletar $count branch(es) selecionada(s)?"
+    echo ""
+    echo "Branches que serão DELETADAS:"
+    echo "$branches" | while read -r branch; do
+      echo "  • $branch"
+    done
+    echo ""
+
+    read -p "Confirmar deleção? (y/N): " confirm
+    [[ "$confirm" == "y" ]] || [[ "$confirm" == "Y" ]]
+  fi
+}
+
+# Deletar branches
+delete_branches() {
+  local branches="$1"
+
+  echo ""
+
+  if command -v gum &> /dev/null; then
+    gum style --foreground="$COLOR_INFO" "Deletando branches..."
+  else
+    echo "Deletando branches..."
+  fi
+
+  echo ""
+
+  local success=0
+  local failed=0
+
+  while IFS= read -r branch; do
+    [ -z "$branch" ] && continue
+
+    if git branch -D "$branch" &> /dev/null; then
+      if command -v gum &> /dev/null; then
+        gum style --foreground="$COLOR_SUCCESS" "✓ $branch deletada"
+      else
+        echo "✓ $branch deletada"
+      fi
+      ((success++))
+    else
+      if command -v gum &> /dev/null; then
+        gum style --foreground="$COLOR_ERROR" "✗ Falha ao deletar $branch"
+      else
+        echo "✗ Falha ao deletar $branch"
+      fi
+      ((failed++))
+    fi
+  done <<< "$branches"
+
+  echo ""
+
+  if command -v gum &> /dev/null; then
+    gum style \
+      --border="rounded" \
+      --border-foreground="$COLOR_SUCCESS" \
+      --padding="1 2" \
+      "$(cat <<EOF
+$(gum style --bold --foreground="$COLOR_SUCCESS" "Concluído!")
+
+Branches deletadas: $success
+$([ $failed -gt 0 ] && echo "Falhas: $failed")
+EOF
+)"
+  else
+    cat <<EOF
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Concluído!
+
+Branches deletadas: $success
+$([ $failed -gt 0 ] && echo "Falhas: $failed")
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+EOF
+  fi
+
+  echo ""
+  sleep 2
+}
+
+#============================================================
+# ENTRY POINT (parcial - para Stories S1-S4)
 #============================================================
 
 main() {
