@@ -599,7 +599,10 @@ select_branches_to_delete() {
     selected=$(echo "$options" | gum filter \
       --placeholder="Digite para filtrar... (ESC para voltar)" \
       --indicator="●" \
-      --no-limit)
+      --no-limit) || {
+      # Se cancelou (ESC), retornar erro
+      return 1
+    }
 
     # Se selecionou Exit ou cancelou
     if [ -z "$selected" ] || echo "$selected" | grep -q "← Exit"; then
@@ -778,7 +781,16 @@ main_loop() {
   while true; do
     # Mostrar menu principal
     local menu_choice
-    menu_choice=$(show_main_menu)
+    menu_choice=$(show_main_menu) || {
+      # Se cancelou (ESC), sair
+      clear
+      if command -v gum &> /dev/null; then
+        gum style --foreground="$COLOR_SUCCESS" "👋 Até logo!"
+      else
+        echo "👋 Até logo!"
+      fi
+      exit 0
+    }
 
     case "$menu_choice" in
       "Deletar branches")
